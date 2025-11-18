@@ -66,6 +66,17 @@ jobs:
               rm -rf /var/www/servisca-website-prev
               mv /var/www/servisca-website /var/www/servisca-website-prev
             fi
+            
+      - name: DEBUG — List workspace files
+        run: |
+          echo "== ROOT =="
+          ls -al .
+          echo "== .next =="
+          ls -al .next || echo ".next NOT FOUND"
+          echo "== public =="
+          ls -al public || echo "public NOT FOUND"
+          echo "== package.json =="
+          ls -al package.json || echo "package.json NOT FOUND"
 
       # ---------------------------------------------------
       # 8. Upload build folder
