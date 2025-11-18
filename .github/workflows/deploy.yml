@@ -43,9 +43,9 @@ jobs:
           echo "  StrictHostKeyChecking no" >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
-      # ======================================================
-      # BACKUP
-      # ======================================================
+      # -------------------------------------------------------
+      # BACKUP CURRENT VERSION (CORRECT WORKING VERSION)
+      # -------------------------------------------------------
       - name: Backup current version
         id: backup
         uses: appleboy/ssh-action@v1.0.3
@@ -58,10 +58,23 @@ jobs:
               TIMESTAMP=$(date +%Y%m%d-%H%M%S)
               BACKUP_PATH="/var/www/servisca-website-backup-$TIMESTAMP"
               cp -r /var/www/servisca-website- "$BACKUP_PATH"
-              echo "backup_path=$BACKUP_PATH" >> $GITHUB_OUTPUT
+              echo "{\"backup_path\": \"$BACKUP_PATH\"}"
             else
-              echo "backup_path=" >> $GITHUB_OUTPUT
+              echo "{\"backup_path\": \"\"}"
             fi
+
+            # -------------------------------------------------------
+            # PARSE BACKUP PATH
+            # -------------------------------------------------------
+            - name: Parse backup path
+              id: backup_parse
+              run: |
+                echo "Full SSH output:"
+                echo '${{ steps.backup.outputs.result }}'
+            
+                BACKUP_PATH=$(echo '${{ steps.backup.outputs.result }}' | jq -r .backup_path)
+                echo "backup_path=$BACKUP_PATH" >> $GITHUB_OUTPUT
+
 
       - name: Read backup output
         id: readbackup
