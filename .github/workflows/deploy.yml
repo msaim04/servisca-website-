@@ -78,7 +78,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "."
           target: "/var/www/servisca-website-"
-          rm: true
+          overwrite: true
 
       # ---------------------------------------------------
       # 9. Install dependencies on server
