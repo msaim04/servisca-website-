@@ -2,16 +2,17 @@ name: Deploy Frontend (Servisca Website)
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   deploy-frontend:
     name: Deploy Servisca Website
     runs-on: ubuntu-latest
+    environment: production  # Optional: Add for manual approval if needed
 
     steps:
-
       # ---------------------------------------------------
       # 1. Checkout repository
       # ---------------------------------------------------
@@ -19,13 +20,13 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------------------------------
-      # 2. Setup Node.js + NPM cache
+      # 2. Setup Node.js
       # ---------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 20.10.0
+          cache: "npm"
 
       # ---------------------------------------------------
       # 3. Install dependencies
@@ -34,124 +35,169 @@ jobs:
         run: npm ci
 
       # ---------------------------------------------------
-      # 4. Lint
+      # 4. Lint code
       # ---------------------------------------------------
       - name: Lint code
         run: npm run lint
 
       # ---------------------------------------------------
-      # 5. Run tests (optional)
+      # 5. Run unit tests
       # ---------------------------------------------------
-      - name: Run tests
+      - name: Run unit tests
         run: npm test --if-present
 
       # ---------------------------------------------------
-      # 6. Build Next.js
+      # 6. Build Next.js project
       # ---------------------------------------------------
-      - name: Build project
+      - name: Build Next.js project
         run: npm run build
 
       # ---------------------------------------------------
-      # 7. Backup current version on server
+      # 7. Debug: Check files before upload
       # ---------------------------------------------------
-      - name: Backup current version (rename)
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Debug - Check workspace and files
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing all files:"
+          ls -la
+          echo "Checking .next directory:"
+          if [ -d .next ] && [ "$(ls -A .next)" ]; then
+            echo ".next exists and has contents"
+            ls -la .next | head -10  # Show first 10 items
+          else
+            echo ".next is missing or empty - build may have failed"
+            exit 1  # Fail early to prevent upload issues
+          fi
+
+      # ---------------------------------------------------
+      # 8. Validate source files exist
+      # ---------------------------------------------------
+      - name: Validate source files
+        run: |
+          REQUIRED_FILES=".next public package.json package-lock.json next.config.js"
+          for file in $REQUIRED_FILES; do
+            if [ ! -e "$file" ]; then
+              echo "Error: Required file/directory '$file' is missing!"
+              exit 1
+            fi
+          done
+          echo "All required source files exist."
+
+      # ---------------------------------------------------
+      # 9. Backup current version on server
+      # ---------------------------------------------------
+      - name: Backup current version
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             if [ -d /var/www/servisca-website ]; then
+              echo "Backing up current version..."
               rm -rf /var/www/servisca-website-prev
               mv /var/www/servisca-website /var/www/servisca-website-prev
+            else
+              echo "No existing version to backup."
             fi
-            mkdir -p /var/www/servisca-website
 
       # ---------------------------------------------------
-      # 8. Upload build output
+      # 10. Upload build to server (using rsync for robustness)
       # ---------------------------------------------------
       - name: Upload build to server
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/rsync-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          source: ".next/ public/ package.json package-lock.json next.config.js"  # Space-separated paths
           target: "/var/www/servisca-website"
-          strip_components: 0
-          source: |
-            .next
-            public
-            package.json
-            package-lock.json
-            next.config.js
-
 
       # ---------------------------------------------------
-      # 9. Install production dependencies on server
+      # 11. Install dependencies on server
       # ---------------------------------------------------
-      - name: Install server dependencies
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Install dependencies on server
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /var/www/servisca-website
+            echo "Installing production dependencies..."
             npm ci --omit=dev
 
       # ---------------------------------------------------
-      # 10. Restart PM2
+      # 12. Start frontend with PM2
       # ---------------------------------------------------
-      - name: Restart PM2
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Start frontend with PM2
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /var/www/servisca-website
+            echo "Starting app with PM2..."
             pm2 delete servisca_frontend || true
-            pm2 start npm --name servisca_frontend -- run start
+            pm2 start npm --name "servisca_frontend" -- run start
             pm2 save
 
       # ---------------------------------------------------
-      # 11. Reload Nginx
+      # 13. Reload Nginx
       # ---------------------------------------------------
       - name: Reload Nginx
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script: sudo systemctl reload nginx
+          script: |
+            echo "Reloading Nginx..."
+            sudo systemctl reload nginx
 
       # ---------------------------------------------------
-      # 12. Health check
+      # 14. Wait for app to stabilize
+      # ---------------------------------------------------
+      - name: Wait for app to stabilize
+        run: sleep 5
+
+      # ---------------------------------------------------
+      # 15. Health check website
       # ---------------------------------------------------
       - name: Health check website
         id: health
         run: |
-          sleep 6
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" ${{ secrets.FRONTEND_URL }} || true)
-          echo "STATUS=$STATUS"
-          echo "failed=$([ "$STATUS" != "200" ] && echo true || echo false)" >> $GITHUB_ENV
+          echo "Performing health check on ${{ secrets.FRONTEND_URL }}..."
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" ${{ secrets.FRONTEND_URL }} || echo "000")
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed (status: $STATUS). Triggering rollback."
+            echo "failed=true" >> $GITHUB_ENV
+            exit 1
+          else
+            echo "Health check passed."
+            echo "failed=false" >> $GITHUB_ENV
+          fi
         continue-on-error: true
 
       # ---------------------------------------------------
-      # 13. Rollback if failed
+      # 16. Rollback if health check failed
       # ---------------------------------------------------
       - name: Rollback to previous version
         if: env.failed == 'true'
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            echo "Rolling back to previous version..."
             rm -rf /var/www/servisca-website
             mv /var/www/servisca-website-prev /var/www/servisca-website
             cd /var/www/servisca-website
             pm2 delete servisca_frontend || true
-            pm2 start npm --name servisca_frontend -- run start
+            pm2 start npm --name "servisca_frontend" -- run start
             pm2 save
             sudo systemctl reload nginx
+            echo "Rollback complete."
