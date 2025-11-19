@@ -74,7 +74,7 @@ jobs:
       # ---------------------------------------------------
       - name: Validate source files
         run: |
-          REQUIRED_FILES=".next public package.json package-lock.json next.config.js"
+          REQUIRED_FILES=".next public package.json package-lock.json"  # Removed next.config.js as it's optional
           for file in $REQUIRED_FILES; do
             if [ ! -e "$file" ]; then
               echo "Error: Required file/directory '$file' is missing!"
@@ -118,10 +118,9 @@ jobs:
             public/ \
             package.json \
             package-lock.json \
-            next.config.js \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website/
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website/  # Removed next.config.js
           
-          echo "Cleaning up SSH key..."
+          echo "Upload complete. Cleaning up SSH key..."
           rm ~/.ssh/id_rsa
 
       # ---------------------------------------------------
