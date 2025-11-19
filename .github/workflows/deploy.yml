@@ -74,7 +74,7 @@ jobs:
       # ---------------------------------------------------
       - name: Validate source files
         run: |
-          REQUIRED_FILES=".next public package.json package-lock.json"  # Removed next.config.js as it's optional
+          REQUIRED_FILES=".next public package.json package-lock.json"
           for file in $REQUIRED_FILES; do
             if [ ! -e "$file" ]; then
               echo "Error: Required file/directory '$file' is missing!"
@@ -93,12 +93,32 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            if [ -d /var/www/servisca-website ]; then
-              echo "Backing up current version..."
-              rm -rf /var/www/servisca-website-prev
-              mv /var/www/servisca-website /var/www/servisca-website-prev
+            if [ -d /var/www/servisca-website- ]; then
+              echo "Backing up current version to /var/www/servisca-website-backup..."
+              rm -rf /var/www/servisca-website-backup
+              mv /var/www/servisca-website- /var/www/servisca-website-backup
             else
               echo "No existing version to backup."
+            fi
+
+      # ---------------------------------------------------
+      # 9.5. Check server disk space
+      # ---------------------------------------------------
+      - name: Check server disk space
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            echo "Checking disk space on server..."
+            DISK_USAGE=$(df /var/www | tail -1 | awk '{print $5}' | sed 's/%//')
+            echo "Disk usage: $DISK_USAGE%"
+            if [ "$DISK_USAGE" -gt 90 ]; then
+              echo "Error: Disk usage is over 90% ($DISK_USAGE%). Free up space before deploying."
+              exit 1
+            else
+              echo "Disk space is sufficient."
             fi
 
       # ---------------------------------------------------
@@ -118,7 +138,7 @@ jobs:
             public/ \
             package.json \
             package-lock.json \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website/  # Removed next.config.js
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website-/
           
           echo "Upload complete. Cleaning up SSH key..."
           rm ~/.ssh/id_rsa
@@ -133,7 +153,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd /var/www/servisca-website
+            cd /var/www/servisca-website-
             echo "Installing production dependencies..."
             npm ci --omit=dev
 
@@ -147,7 +167,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd /var/www/servisca-website
+            cd /var/www/servisca-website-
             echo "Starting app with PM2..."
             pm2 delete servisca_frontend || true
             pm2 start npm --name "servisca_frontend" -- run start
@@ -203,9 +223,9 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             echo "Rolling back to previous version..."
-            rm -rf /var/www/servisca-website
-            mv /var/www/servisca-website-prev /var/www/servisca-website
-            cd /var/www/servisca-website
+            rm -rf /var/www/servisca-website-
+            mv /var/www/servisca-website-backup /var/www/servisca-website-
+            cd /var/www/servisca-website-
             pm2 delete servisca_frontend || true
             pm2 start npm --name "servisca_frontend" -- run start
             pm2 save
