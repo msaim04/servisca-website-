@@ -10,7 +10,7 @@ jobs:
   deploy-frontend:
     name: Deploy Servisca Website
     runs-on: ubuntu-latest
-    environment: production  # Optional: For manual approval
+    environment: production
 
     steps:
       # ---------------------------------------------------
@@ -168,10 +168,19 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /var/www/servisca-website-
-            echo "Starting app with PM2..."
+            echo "Starting app with PM2 on port 3001..."
             pm2 delete servisca_frontend || true
-            pm2 start npm --name "servisca_frontend" -- run start
+            PORT=3001 pm2 start npm --name "servisca_frontend" -- run start
             pm2 save
+            # Check if the process is running and log errors
+            if pm2 describe servisca_frontend > /dev/null 2>&1; then
+              echo "PM2 process servisca_frontend started successfully on port 3001."
+              pm2 logs servisca_frontend --lines 10 --nostream  # Show recent logs
+            else
+              echo "Error: Failed to start PM2 process servisca_frontend."
+              pm2 logs servisca_frontend --lines 20 --nostream || echo "No logs available."
+              exit 1
+            fi
 
       # ---------------------------------------------------
       # 13. Reload Nginx
@@ -184,7 +193,15 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             echo "Reloading Nginx..."
-            sudo systemctl reload nginx
+            # Test config first
+            if sudo nginx -t; then
+              sudo systemctl reload nginx
+              echo "Nginx reloaded successfully."
+            else
+              echo "Error: Nginx config test failed. Check /etc/nginx/sites-available/servisca."
+              sudo nginx -t  # Show error details
+              exit 1
+            fi
 
       # ---------------------------------------------------
       # 14. Wait for app to stabilize
@@ -227,7 +244,7 @@ jobs:
             mv /var/www/servisca-website-backup /var/www/servisca-website-
             cd /var/www/servisca-website-
             pm2 delete servisca_frontend || true
-            pm2 start npm --name "servisca_frontend" -- run start
+            PORT=3001 pm2 start npm --name "servisca_frontend" -- run start
             pm2 save
             sudo systemctl reload nginx
             echo "Rollback complete."
