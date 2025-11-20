@@ -138,17 +138,23 @@ jobs:
           echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
-          
-          echo "Uploading files with rsync..."
-          rsync -avz --delete \
-            .next/ \
-            public/ \
-            package.json \
-            package-lock.json \
+      
+          echo "Uploading standalone build..."
+      
+          rsync -avz --delete .next/standalone/ \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website-/
-          
-          echo "Upload complete. Cleaning up SSH key..."
-          rm ~/.ssh/id_rsa
+      
+          rsync -avz .next/static/ \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website-/.next/static/
+      
+          rsync -avz public/ \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website-/public/
+      
+          rsync -avz package.json \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/servisca-website-/
+      
+          echo "Upload complete."
+
 
       # ---------------------------------------------------
       # 11. Install dependencies on server
